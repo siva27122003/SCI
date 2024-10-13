@@ -12,50 +12,49 @@ from model import Finetunemodel
 from multi_read_data import MemoryFriendlyLoader
 
 parser = argparse.ArgumentParser("SCI")
-parser.add_argument('--data_path', type=str, default='./data/medium',
-                    help='location of the data corpus')
-parser.add_argument('--save_path', type=str, default='./results/medium', help='location of the data corpus')
-parser.add_argument('--model', type=str, default='./weights/medium.pt', help='location of the data corpus')
+parser.add_argument('--input_image', type=str, default='', help='path to the input image')  # modified
+parser.add_argument('--output_dir', type=str, default='./results', help='directory for saving output image')  # modified
 parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
 parser.add_argument('--seed', type=int, default=2, help='random seed')
 
 args = parser.parse_args()
-save_path = args.save_path
-os.makedirs(save_path, exist_ok=True)
+os.makedirs(args.output_dir, exist_ok=True)
 
-TestDataset = MemoryFriendlyLoader(img_dir=args.data_path, task='test')
-
-test_queue = torch.utils.data.DataLoader(
-    TestDataset, batch_size=1,
-    pin_memory=True, num_workers=0)
-
-
-def save_images(tensor, path):
+def save_image(tensor, path):
     image_numpy = tensor[0].cpu().float().numpy()
     image_numpy = (np.transpose(image_numpy, (1, 2, 0)))
     im = Image.fromarray(np.clip(image_numpy * 255.0, 0, 255.0).astype('uint8'))
     im.save(path, 'png')
-
 
 def main():
     if not torch.cuda.is_available():
         print('no gpu device available')
         sys.exit(1)
 
+    # Load the model from the default path
     model = Finetunemodel(args.model)
     model = model.cuda()
 
+    # Load the input image
+    input_image_path = args.input_image
+    if not os.path.exists(input_image_path):
+        print(f'Error: Input image {input_image_path} does not exist.')
+        sys.exit(1)
+    
+    # Prepare the image
+    input_image = Image.open(input_image_path).convert('RGB')
+    input_tensor = torch.from_numpy(np.asarray(input_image).transpose(2, 0, 1)).float().unsqueeze(0).cuda()
+
     model.eval()
     with torch.no_grad():
-        for _, (input, image_name) in enumerate(test_queue):
-            input = Variable(input, volatile=True).cuda()
-            image_name = image_name[0].split('\\')[-1].split('.')[0]
-            i, r = model(input)
-            u_name = '%s.png' % (image_name)
-            print('processing {}'.format(u_name))
-            u_path = save_path + '/' + u_name
-            save_images(r, u_path)
+        input_var = Variable(input_tensor, volatile=True).cuda()
+        i, r = model(input_var)
 
+        # Save the output image
+        output_image_name = os.path.basename(input_image_path).split('.')[0] + '_output.png'
+        output_image_path = os.path.join(args.output_dir, output_image_name)
+        save_image(r, output_image_path)
+        print(f'Processing completed. Output saved at: {output_image_path}')
 
 
 if __name__ == '__main__':
